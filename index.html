@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chronological Image Video Generator</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      height: 100vh;
+      background-color: #f4f4f4;
+    }
+    header, footer {
+      text-align: center;
+      padding: 10px;
+      background: #007bff;
+      color: white;
+    }
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .controls {
+      margin-bottom: 20px;
+    }
+    .controls input {
+      margin-bottom: 10px;
+    }
+    .preview-container {
+      width: 80%;
+      max-width: 800px;
+      height: 400px;
+      border: 1px dashed #ccc;
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+      flex-wrap: wrap;
+      background-color: white;
+      position: relative;
+      overflow-y: auto;
+      padding: 10px;
+    }
+    .preview-container img {
+      max-width: 150px;
+      max-height: 150px;
+      margin: 5px;
+      object-fit: cover;
+      border: 1px solid #ddd;
+      box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.1);
+      transition: transform 0.2s;
+    }
+    .preview-container img:hover {
+      transform: scale(1.1);
+    }
+    .preview-container .date-label {
+      position: absolute;
+      bottom: 5px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 2px 5px;
+      border-radius: 3px;
+      font-size: 0.8rem;
+    }
+    .video-container {
+      display: none;
+      width: 80%;
+      max-width: 800px;
+      margin-top: 20px;
+      text-align: center;
+    }
+    .progress-container {
+      width: 80%;
+      max-width: 800px;
+      margin-top: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .progress-bar {
+      width: 100%;
+      height: 20px;
+      background: #e0e0e0;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+    .progress-bar div {
+      height: 100%;
+      background: #007bff;
+      width: 0;
+      transition: width 0.2s;
+    }
+    .progress-info {
+      font-size: 1rem;
+      color: #333;
+    }
+    .buttons {
+      margin-top: 20px;
+      display: flex;
+      gap: 10px;
+    }
+    .buttons button {
+      padding: 10px 20px;
+      background: #007bff;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    .buttons button:hover {
+      background: #0056b3;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Chronological Image Video Generator</h1>
+  </header>
+  <main>
+    <div class="controls">
+      <input type="file" id="imageInput" multiple accept="image/*">
+      <button id="generateVideo">Generate Video</button>
+    </div>
+    <div class="preview-container" id="previewContainer">
+      <p>Upload images to preview the transition</p>
+    </div>
+    <div class="progress-container" id="progressContainer">
+      <div class="progress-bar"><div id="progressBar"></div></div>
+      <div class="progress-info" id="progressInfo">Progress: 0% | Time remaining: Calculating...</div>
+    </div>
+    <div class="video-container" id="videoContainer">
+      <video controls id="videoPreview" style="width: 100%;"></video>
+    </div>
+    <div class="buttons" id="downloadContainer" style="display: none;">
+      <button id="downloadVideo">Download Video</button>
+    </div>
+  </main>
+  <footer>
+    <p>&copy; 2024 Chronological Video Generator</p>
+  </footer>
+  <script>
+    const imageInput = document.getElementById('imageInput');
+    const previewContainer = document.getElementById('previewContainer');
+    const generateVideoButton = document.getElementById('generateVideo');
+    const progressContainer = document.getElementById('progressContainer');
+    const progressBar = document.getElementById('progressBar');
+    const progressInfo = document.getElementById('progressInfo');
+    const downloadContainer = document.getElementById('downloadContainer');
+    const downloadVideoButton = document.getElementById('downloadVideo');
+    const videoContainer = document.getElementById('videoContainer');
+    const videoPreview = document.getElementById('videoPreview');
+
+    let images = [];
+
+    function extractExifDate(file, callback) {
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        const dataUrl = e.target.result;
+        const exif = piexif.load(dataUrl);
+        const dateTime = exif["0th"][piexif.ImageIFD.DateTime];
+        if (dateTime) {
+          const [date, time] = dateTime.split(" ");
+          const [year, month, day] = date.split(":");
+          const [hour, minute, second] = time.split(":");
+          const timestamp = new Date(year, month - 1, day, hour, minute, second).getTime();
+          callback(timestamp, file);
+        } else {
+          callback(file.lastModified, file);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+
+    imageInput.addEventListener('change', (e) => {
+      const files = Array.from(e.target.files);
+      const tempImages = [];
+      let processed = 0;
+
+      files.forEach(file => {
+        extractExifDate(file, (timestamp, file) => {
+          tempImages.push({ timestamp, file });
+          processed++;
+          if (processed === files.length) {
+            images = tempImages.sort((a, b) => a.timestamp - b.timestamp);
+            console.log("Sorted Images:", images.map(img => ({ name: img.file.name, timestamp: new Date(img.timestamp).toLocaleString() })));
+            previewImages();
+          }
+        });
+      });
+    });
+
+    function previewImages() {
+      previewContainer.innerHTML = '';
+      images.forEach((imgData, index) => {
+        const imgWrapper = document.createElement('div');
+        imgWrapper.style.position = 'relative';
+
+        const img = document.createElement('img');
+        const dateLabel = document.createElement('div');
+        dateLabel.className = 'date-label';
+        dateLabel.textContent = new Date(imgData.timestamp).toLocaleString();
+
+        const reader = new FileReader();
+        reader.onload = function (e) {
+          img.src = e.target.result;
+          imgWrapper.appendChild(img);
+          imgWrapper.appendChild(dateLabel);
+          previewContainer.appendChild(imgWrapper);
+        };
+        reader.readAsDataURL(imgData.file);
+      });
+    }
+
+    generateVideoButton.addEventListener('click', async () => {
+      if (images.length === 0) {
+        alert('Please upload images first.');
+        return;
+      }
+
+      progressContainer.style.display = 'flex';
+      progressBar.style.width = '0';
+      progressInfo.textContent = 'Progress: 0%';
+
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const videoChunks = [];
+
+      const videoStream = canvas.captureStream(30);
+      const mediaRecorder = new MediaRecorder(videoStream);
+      mediaRecorder.ondataavailable = (event) => videoChunks.push(event.data);
+
+      canvas.width = 800;
+      canvas.height = 600;
+
+      mediaRecorder.start();
+
+      for (let i = 0; i < images.length; i++) {
+        const imgData = images[i];
+        const img = new Image();
+        img.src = URL.createObjectURL(imgData.file);
+
+        await new Promise((resolve) => {
+          img.onload = () => {
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight);
+
+            const dateLabel = new Date(imgData.timestamp).toLocaleString();
+            ctx.font = '40px Arial';
+            ctx.fillStyle = 'white';
+            ctx.textAlign = 'center';
+            ctx.fillText(dateLabel, canvas.width / 2, 50);
+
+            progressBar.style.width = `${((i + 1) / images.length) * 100}%`;
+            progressInfo.textContent = `Progress: ${Math.round(((i + 1) / images.length) * 100)}%`;
+
+            resolve();
+          };
+        });
+
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+
+      mediaRecorder.stop();
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(videoChunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+
+        videoPreview.src = url;
+        videoContainer.style.display = 'block';
+
+        downloadVideoButton.onclick = () => {
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'video.webm';
+          a.click();
+        };
+
+        downloadContainer.style.display = 'block';
+      };
+    });
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/piexifjs"></script>
+</body>
+</html>
